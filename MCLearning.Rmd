@@ -1,0 +1,123 @@
+---
+title: "Prediction Assignment"
+author: "Balakrishna Padmanabhan"
+date: "July 10, 2016"
+output: html_document
+---
+## Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project isto use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, who were asked to perform barbell lifts correctly and incorrectly in 5 different ways:
+
+1. Exactly according to specification (Class A)
+2. Throwing the elbows to the front (Class B)
+3. Lifting the dumbell only half way (Class C)
+4. Lowering the dumbell only half way (Class D)
+5. Throwing the hips to the front (Class E)
+
+The data from the project comes from [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har)
+
+## Data
+
+The training data for this project are available here:
+
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data are available here:
+
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+
+## Initializing and Loading Data
+
+Load the required R packages
+
+```{r, echo=TRUE}
+require(caret)
+```
+
+Load the given data that has been downloaded.
+
+```{r, echo=TRUE}
+baseTrain <- read.csv("data/pml-training.csv",na.strings=c("NA","DIV/0!"))
+baseTest  <- read.csv("data/pml-testing.csv",na.strings=c("NA","DIV/0!"))
+```
+The training set has `r dim(baseTrain)[1]` rows and `r dim(baseTrain)[2]` columns.  The testing set has `r dim(baseTest)[1]` rows and `r dim(baseTest)[2]` columns.
+
+## Clean the data
+
+The data has many NA values, which need to be removed.
+```{r, echo=TRUE}
+theTest1 <- baseTest[1:159]
+features <- names(theTest1[,colSums(is.na(theTest1)) == 0])
+baseTrain <- baseTrain[,c(features,"classe")]
+baseTest <- baseTest[,c(features,"problem_id")]
+```
+
+Delete the first seven quantities that are irrelevant to the problem.
+```{r, echo =TRUE}
+baseTrain <- baseTrain[,-c(1:7)]
+baseTest <- baseTest[,-c(1:7)]
+```
+
+The training set has `r dim(baseTrain)[1]` rows and `r dim(baseTrain)[2]` columns.  The testing set has `r dim(baseTest)[1]` rows and `r dim(baseTest)[2]` 
+
+Now remove predictors that show very small variances.  Also, remove predictors which are highly correlated.
+
+```{r, echo = TRUE}
+nZ <- nearZeroVar(baseTrain, saveMetrics = T)
+baseTrain <- baseTrain[,nZ$nzv==FALSE]
+dim(baseTrain)
+
+corrm <- abs(cor(baseTrain[,-dim(baseTrain)[2]]))
+diag(corrm) <- 0
+corrc <- findCorrelation(corrm,verbose=FALSE,cutoff = 0.95)
+baseTrain <- baseTrain[,-c(corrc)]
+```
+
+The training set now has `r dim(baseTrain)[1]` rows and `r dim(baseTrain)[2]` columns.
+
+## Create the Partition
+
+Split the training set into a training and test parts.
+
+```{r, echo = TRUE}
+set.seed(21719)
+inTrain <- createDataPartition(baseTrain$classe,p=0.75, list=F)
+myTrain <- baseTrain[inTrain,]
+myTest <- baseTrain[-inTrain,]
+```
+
+### Preprocess the training data
+We use principal components analysis to reduce the problem scope, primarily to save time.
+
+``` {r, echo = TRUE}
+pcaProc <- preProcess(myTrain[,-dim(myTrain)[2]],method="pca",thresh=0.95)
+myTrainPC <- predict(pcaProc, myTrain[,-dim(myTrain)[2]] )
+myTestPC <- predict(pcaProc, myTest[,-dim(myTrain)[2]] )
+pcaProc
+```
+
+## Model
+
+We train a model using the random forest approach using the smaller training set from the PCA preprocessing.  The oob resampling approach is used.
+
+```{r, echo = TRUE}
+crf <- trainControl(method="oob")
+modFit <- train(myTrain$classe ~ ., myTrainPC, method ="rf", trControl=crf,importance = TRUE)
+preValRF <- predict(modFit, myTestPC)
+cfm <- confusionMatrix(myTest$classe, preValRF)
+cfm
+```
+
+The accuracy on the validation data is `r round(cfm$overall["Accuracy"],digits=3)` percent.  The out-of-sample error is `r round(1.0-cfm$overall["Accuracy"],digits=3)`.
+
+## Predictions on the test data
+
+The model is applied on the provided test data.
+
+```{r, echo=TRUE}
+testPC <- predict(pcaProc,baseTest[,-dim(baseTest)[2]])
+finres <- predict(modFit, testPC)
+finres
+```
+
